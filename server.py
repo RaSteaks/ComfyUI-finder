@@ -62,6 +62,7 @@ def _list_entries(directory: Path) -> list[dict]:
                     "size": stat.st_size if item.is_file() else None,
                     "mtime": int(stat.st_mtime),
                     "relative_path": _to_relative(item),
+                    "full_path": str(item),
                 }
             )
         except OSError:
@@ -166,3 +167,33 @@ def register_routes() -> None:
             }
             return web.FileResponse(path=target, headers=headers)
         return web.FileResponse(path=target)
+
+    @routes.get("/finder/search")
+    async def finder_search(request: web.Request) -> web.Response:
+        query = request.query.get("q", "").strip().lower()
+        if not query:
+            raise web.HTTPBadRequest(text="Query is required")
+
+        results = []
+        try:
+            for item in ROOT_DIR.rglob("*"):
+                try:
+                    # 只搜索文件，跳过文件夹
+                    if item.is_file() and query in item.name.lower():
+                        stat = item.stat()
+                        results.append(
+                            {
+                                "name": item.name,
+                                "is_dir": False,
+                                "size": stat.st_size,
+                                "mtime": int(stat.st_mtime),
+                                "relative_path": _to_relative(item),
+                                "full_path": str(item),
+                            }
+                        )
+                except OSError:
+                    continue
+        except Exception as exc:
+            raise web.HTTPInternalServerError(text=f"Search failed: {exc}") from exc
+
+        return web.json_response({"query": query, "results": results})
