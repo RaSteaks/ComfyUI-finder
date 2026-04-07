@@ -14,6 +14,8 @@ app.registerExtension({
       entries: [],
       visible: false,
       hasPositioned: false,
+      isSearchMode: false,
+      searchQuery: "",
     };
 
     const panel = document.createElement("div");
@@ -44,6 +46,12 @@ app.registerExtension({
           <option value="size">Size</option>
         </select>
         <button class="finder-btn" data-action="toggle-sort-dir">Desc</button>
+      </div>
+
+      <div class="finder-search-bar">
+        <input type="text" class="finder-search-input" placeholder="Search files... (Press Enter)" />
+        <button class="finder-btn" data-action="search">Search</button>
+        <button class="finder-btn" data-action="clear-search">Clear</button>
       </div>
 
       <div class="finder-content">
@@ -160,6 +168,28 @@ app.registerExtension({
         padding: 10px 12px;
         border-bottom: 1px solid var(--line);
         background: #101b2a;
+      }
+      #comfyui-finder-panel .finder-search-bar {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+        background: #0d1624;
+      }
+      #comfyui-finder-panel .finder-search-input {
+        border: 1px solid #365071;
+        background: #10233a;
+        color: var(--text);
+        border-radius: 8px;
+        padding: 7px 10px;
+        font-size: 12px;
+        font-family: inherit;
+        outline: none;
+      }
+      #comfyui-finder-panel .finder-search-input:focus {
+        border-color: var(--accent);
       }
       #comfyui-finder-panel .finder-select {
         border: 1px solid #365071;
@@ -294,6 +324,39 @@ app.registerExtension({
         text-align: center;
         padding: 18px;
       }
+      #comfyui-finder-panel .finder-preview-fileinfo {
+        padding: 10px;
+        background: #0d1a2a;
+        border: 1px solid #2b3f5b;
+        border-radius: 8px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      #comfyui-finder-panel .finder-file-info {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      #comfyui-finder-panel .info-row {
+        display: flex;
+        gap: 8px;
+      }
+      #comfyui-finder-panel .info-label {
+        color: #6c87ac;
+        min-width: 60px;
+        flex-shrink: 0;
+      }
+      #comfyui-finder-panel .info-value {
+        color: var(--text);
+        word-break: break-all;
+        flex: 1;
+      }
+      #comfyui-finder-panel .copy-path-btn {
+        padding: 2px 6px;
+        font-size: 12px;
+        min-width: auto;
+        margin-left: 4px;
+      }
       #comfyui-finder-panel .finder-preview-media {
         max-width: 100%;
         max-height: 100%;
@@ -354,6 +417,7 @@ app.registerExtension({
     const headEl = panel.querySelector(".finder-head");
     const resizerEl = panel.querySelector(".finder-resizer");
     const closeBtnEl = panel.querySelector(".finder-close");
+    const searchInput = panel.querySelector(".finder-search-input");
 
     const MIN_WIDTH = 520;
     const MIN_HEIGHT = 420;
@@ -444,6 +508,30 @@ app.registerExtension({
             refreshList(entry.relative_path).catch((error) => setLog(error.message));
             return;
           }
+          // 搜索模式下，双击文件跳转到所在文件夹
+          if (state.isSearchMode && !entry.is_dir) {
+            const parentPath = entry.relative_path.includes("/")
+              ? entry.relative_path.substring(0, entry.relative_path.lastIndexOf("/"))
+              : "";
+            searchInput.value = "";
+            state.isSearchMode = false;
+            state.searchQuery = "";
+            refreshList(parentPath).then(() => {
+              // 高亮选中的文件
+              state.selectedPath = entry.relative_path;
+              state.selectedIsDir = false;
+              const rows = listEl.querySelectorAll(".finder-row");
+              rows.forEach((r) => {
+                if (r.dataset.path === entry.relative_path) {
+                  r.classList.add("active");
+                  r.scrollIntoView({ behavior: "smooth", block: "center" });
+                } else {
+                  r.classList.remove("active");
+                }
+              });
+            }).catch((error) => setLog(error.message));
+            return;
+          }
           if (isImageFile(entry.name)) {
             loadImageToWorkflow(entry)
               .then(() => refreshList(state.currentPath))
@@ -471,6 +559,42 @@ app.registerExtension({
       previewEl.innerHTML = `<div class="finder-preview-empty">${message}</div>`;
     }
 
+    function getFileInfoHtml(entry) {
+      const fullPath = entry.full_path || entry.relative_path;
+      return `
+        <div class="finder-file-info">
+          <div class="info-row">
+            <span class="info-label">Path:</span>
+            <span class="info-value">${fullPath}</span>
+            <button class="finder-btn copy-path-btn" data-path="${fullPath}" title="Copy path">📋</button>
+          </div>
+          <div class="info-row"><span class="info-label">Size:</span> <span class="info-value">${formatSize(entry.size)}</span></div>
+        </div>
+      `;
+    }
+
+    async function copyToClipboard(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        setLog(`Copied to clipboard: ${text}`);
+      } catch (error) {
+        // 降级方案
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          document.execCommand("copy");
+          setLog(`Copied to clipboard: ${text}`);
+        } catch (e) {
+          setLog(`Copy failed: ${e.message}`);
+        }
+        document.body.removeChild(textarea);
+      }
+    }
+
     function renderPreview(entry) {
       if (!entry || entry.is_dir) {
         clearPreview(entry?.is_dir ? "Folder selected (no preview)" : undefined);
@@ -484,14 +608,25 @@ app.registerExtension({
       const box = document.createElement("div");
       box.className = "finder-preview-box";
 
+      const fileInfo = document.createElement("div");
+      fileInfo.className = "finder-preview-fileinfo";
+      fileInfo.innerHTML = getFileInfoHtml(entry);
+
       if (isImageFile(entry.name)) {
         const image = document.createElement("img");
         image.className = "finder-preview-media";
         image.src = src;
         image.alt = entry.name;
         image.loading = "lazy";
-        image.onerror = () => clearPreview("Image preview failed");
+        image.onerror = () => {
+          box.innerHTML = `<div class="finder-preview-empty">Image preview failed</div>`;
+        };
         box.appendChild(image);
+
+        previewEl.innerHTML = "";
+        previewEl.appendChild(title);
+        previewEl.appendChild(box);
+        previewEl.appendChild(fileInfo);
       } else if (isVideoFile(entry.name)) {
         const video = document.createElement("video");
         video.className = "finder-preview-media";
@@ -502,16 +637,32 @@ app.registerExtension({
         video.onloadeddata = () => {
           video.currentTime = 0;
         };
-        video.onerror = () => clearPreview("Video preview failed");
+        video.onerror = () => {
+          box.innerHTML = `<div class="finder-preview-empty">Video preview failed</div>`;
+        };
         box.appendChild(video);
+
+        previewEl.innerHTML = "";
+        previewEl.appendChild(title);
+        previewEl.appendChild(box);
+        previewEl.appendChild(fileInfo);
       } else {
-        clearPreview("This file type does not support preview");
-        return;
+        // 非图片/视频文件，只显示文件信息
+        previewEl.innerHTML = "";
+        previewEl.appendChild(title);
+        previewEl.appendChild(fileInfo);
       }
 
-      previewEl.innerHTML = "";
-      previewEl.appendChild(title);
-      previewEl.appendChild(box);
+      // 绑定复制路径按钮事件
+      const copyBtn = previewEl.querySelector(".copy-path-btn");
+      if (copyBtn) {
+        copyBtn.addEventListener("click", () => {
+          const path = copyBtn.dataset.path;
+          if (path) {
+            copyToClipboard(path);
+          }
+        });
+      }
     }
 
     async function loadImageToWorkflow(entry) {
@@ -699,6 +850,8 @@ app.registerExtension({
     }
 
     async function refreshList(path = state.currentPath) {
+      state.isSearchMode = false;
+      state.searchQuery = "";
       const params = new URLSearchParams({ path: path || "" });
       const data = await callJson(`/finder/list?${params.toString()}`);
       state.currentPath = data.current_path || "";
@@ -708,6 +861,35 @@ app.registerExtension({
       pathEl.textContent = `ComfyUI root / ${state.currentPath || "."}`;
       clearPreview();
       renderEntries(state.entries);
+    }
+
+    async function searchFiles(query) {
+      if (!query.trim()) {
+        setLog("Please enter a search term");
+        return;
+      }
+      state.isSearchMode = true;
+      state.searchQuery = query.trim();
+      try {
+        const params = new URLSearchParams({ q: state.searchQuery });
+        const data = await callJson(`/finder/search?${params.toString()}`);
+        state.entries = data.results || [];
+        state.selectedPath = "";
+        state.selectedIsDir = false;
+        pathEl.textContent = `Search: "${state.searchQuery}" (${state.entries.length} results)`;
+        clearPreview();
+        renderEntries(state.entries);
+        setLog(`Found ${state.entries.length} results for "${state.searchQuery}"`);
+      } catch (error) {
+        setLog(`Search failed: ${error.message}`);
+      }
+    }
+
+    function clearSearch() {
+      searchInput.value = "";
+      state.isSearchMode = false;
+      state.searchQuery = "";
+      refreshList(state.currentPath);
     }
 
     function togglePanel(force) {
@@ -800,6 +982,10 @@ app.registerExtension({
             state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
             btn.textContent = state.sortDir === "asc" ? "Asc" : "Desc";
             renderEntries(state.entries);
+          } else if (action === "search") {
+            await searchFiles(searchInput.value);
+          } else if (action === "clear-search") {
+            clearSearch();
           }
         } catch (error) {
           setLog(error.message);
@@ -827,6 +1013,13 @@ app.registerExtension({
         }
       }
       await refreshList();
+    });
+
+    searchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        searchFiles(searchInput.value);
+      }
     });
 
     window.addEventListener(
