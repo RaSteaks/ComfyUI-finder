@@ -97,7 +97,10 @@ git clone https://github.com/JHBOY-ha/ComfyUI-finder.git
 ### 文件预览
 
 - **图片文件**（jpg/png/webp/gif/bmp/svg/avif）：显示缩略图 + 文件信息
-- **视频文件**（mp4/webm/mov/m4v/avi/mkv）：显示可播放视频 + 文件信息
+- **视频文件**：显示可播放视频 + 文件信息
+  - 支持格式：MP4、WebM、MOV 等（需浏览器原生支持的视频编码）
+  - 推荐编码：**H.264 (AVC)** - 所有浏览器都支持
+  - 不支持的编码：H.265/HEVC、MPEG-4 Visual 等
 - **其他文件**：仅显示文件信息（完整路径、大小）
 
 ## 注意事项
@@ -105,4 +108,4 @@ git clone https://github.com/JHBOY-ha/ComfyUI-finder.git
 - 所有文件操作都限制在 ComfyUI 根目录内，无法访问上级目录
 - 删除为永久删除，请谨慎操作
 - 搜索功能只搜索文件，不搜索文件夹
-- 视频预览需要浏览器支持的视频编码（推荐 H.264）
+- 视频预览需要浏览器支持的视频编码（推荐 **H.264/AVC**）
